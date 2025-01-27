@@ -1,60 +1,103 @@
-#ifndef EVENT_PROCESOR_H_
-#define EVENT_PROCESOR_H_
+#ifndef EVENT_PROCESSOR_H_
+#define EVENT_PROCESSOR_H_
 
 #include <assert.h>
-// #include "raylib.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+// Use #define STATIC_EVENT_PROCESSOR for static behaviour.
 void ep_init(void);
-void ep_new_callback(const char *name,
-                     bool (*trigger_predicate)(void));
-void ep_attach(const char *cb_name,
+void ep_new_event(const char *event_name,
+                  bool (*event_predicate)(void));
+void ep_attach(const char *event_name,
                void *observer,
                bool (*observer_predicate)(void *, ...),
                void (*observer_notify)(void *, ...));
 void ep_destroy(void);
 
-#endif
-#define EVENT_PROCESOR_H_IMPLEMENTATION
-#ifdef EVENT_PROCESOR_H_IMPLEMENTATION
+#ifdef RAYLIB_H
+// Raylib 5.5 specific functions.
 
-typedef struct Observer
+bool mouse_left_click_predicate(void)
+{
+    return IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
+bool mouse_right_click_predicate(void)
+{
+    return IsMouseButtonPressed(MOUSE_BUTTON_RIGHT);
+}
+#endif // RAYLIB_H
+
+#endif // EVENT_PROCESSOR_H_
+
+#define EVENT_PROCESSOR_H_IMPLEMENTATION
+#ifdef EVENT_PROCESSOR_H_IMPLEMENTATION
+
+typedef struct ObserverStruct
 {
     void *observer;
     void (*observer_notify)(void *, ...);
     bool (*observer_predicate)(void *, ...);
 } Observer;
 
-typedef struct CallbackList
+#ifdef STATIC_EVENT_PROCESSOR
+// REDIFINE FOR MORE
+
+#ifndef OBSERVERS_CAPACITY
+#define OBSERVERS_CAPACITY 32
+#endif
+
+#ifndef CALLBACKS_CAPACITY
+#define CALLBACKS_CAPACITY 32
+#endif
+
+#endif
+
+typedef struct CallbackListStruct
 {
     int count;
     int capacity;
     const char *name;
-    bool (*trigger_predicate)(void);
+    bool (*event_predicate)(void);
+#ifndef STATIC_EVENT_PROCESSOR
     Observer *observers;
+
+#else
+    Observer observers[OBSERVERS_CAPACITY];
+#endif
 
 } CallbackList;
 
-typedef struct EventProcesor
+typedef struct EventProcesorStruct
 {
     int count;
     int capacity;
+#ifndef STATIC_EVENT_PROCESSOR
     CallbackList *callbacks;
+#else
+    CallbackList callbacks[CALLBACKS_CAPACITY];
+
+#endif
 
 } EventProcesor;
 
-EventProcesor ep = {0};
+static EventProcesor ep = {0};
 
 void ep_init()
 {
     ep.count = 0;
+#ifndef STATIC_EVENT_PROCESSOR
     ep.capacity = 8;
-    ep.callbacks = (CallbackList *)malloc(sizeof(CallbackList) * ep.capacity); // TODO: Static and Dynamic allocation.
+    ep.callbacks = (CallbackList *)malloc(sizeof(CallbackList) * ep.capacity);
+#else
+    ep.capacity = CALLBACKS_CAPACITY;
+
+#endif
 }
 
-int _get_callback_index(const char *name)
+static int _get_callback_index(const char *name)
 {
     for (int idx = 0; idx < ep.count; idx++)
     {
@@ -64,24 +107,52 @@ int _get_callback_index(const char *name)
     return -1;
 }
 
-void ep_new_callback(const char *name, bool (*trigger_predicate)(void))
+void ep_new_event(const char *event_name, bool (*event_predicate)(void))
 {
-    assert(ep.capacity > ep.count && "Callbacks capacity exausted!"); // TODO: Dynamic allocation.
+#ifdef STATIC_EVENT_PROCESSOR
+
+    assert(ep.capacity > ep.count && "Events capacity exausted!"); // TODO: Dynamic allocation.
+#else
+    if (ep.count >= ep.capacity)
+    {
+        printf("INFO: Events capacity exausted! Reallocating...\n");
+        ep.capacity *= 2;
+        ep.callbacks = (CallbackList *)realloc(ep.callbacks, sizeof(CallbackList) * ep.capacity);
+    }
+#endif
     CallbackList cb = {0};
     cb.count = 0;
-    cb.capacity = 128;
-    cb.name = name;
+    cb.name = event_name;
+
+#ifdef STATIC_EVENT_PROCESSOR
+    cb.capacity = OBSERVERS_CAPACITY;
+#else
+    cb.capacity = 2;
     cb.observers = (Observer *)malloc(sizeof(Observer) * cb.capacity);
-    cb.trigger_predicate = trigger_predicate;
+#endif
+
+    cb.event_predicate = event_predicate;
     ep.callbacks[ep.count++] = cb;
 }
 
-void ep_attach(const char *cb_name, void *observer, bool (*observer_predicate)(void *, ...), void (*observer_notify)(void *, ...))
+void ep_attach(const char *event_name, void *observer, bool (*observer_predicate)(void *, ...), void (*observer_notify)(void *, ...))
 {
-    int cb_idx = _get_callback_index(cb_name);
-    assert(cb_idx != -1 && "No callback registered with that name!");
+    int cb_idx = _get_callback_index(event_name);
+    assert(cb_idx != -1 && "No event registered with that name!");
 
-    CallbackList *cb = &ep.callbacks[cb_idx]; // TODO: make dynamic alloc...
+    CallbackList *cb = &ep.callbacks[cb_idx];
+
+#ifndef STATIC_EVENT_PROCESSOR
+    if (cb->count >= cb->capacity)
+    {
+        cb->capacity *= 2;
+        printf("INFO: Observers capacity of %s exausted! Reallocating to new size %d...\n", event_name, cb->capacity);
+        cb->observers = (Observer *)realloc(cb->observers, sizeof(Observer) * cb->capacity);
+    }
+#else
+
+    assert(cb->count < cb->capacity && "Exausted observers capacity");
+#endif
 
     cb->observers[cb->count] = (Observer){
         .observer = observer,
@@ -95,7 +166,7 @@ void ep_porcess_events()
     for (int cidx = 0; cidx < ep.count; cidx++)
     {
         CallbackList *cb = &ep.callbacks[cidx];
-        if (cb->trigger_predicate())
+        if (cb->event_predicate())
         {
 
             for (int obs_idx = 0; obs_idx < cb->count; obs_idx++)
@@ -123,14 +194,15 @@ void ep_porcess_events()
 
 void ep_destroy()
 {
+#ifndef STATIC_EVENT_PROCESSOR
     for (int cidx = 0; cidx < ep.count; cidx++)
     {
         CallbackList *cb = &ep.callbacks[cidx];
         free(cb->observers);
     }
+    ep.count = 0;
     free(ep.callbacks);
+#endif
 }
 
-
-
-#endif
+#endif // EVENT_PROCESSOR_H_IMPLEMENTATION
